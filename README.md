@@ -1,2 +1,2 @@
 # setup-scripts
-Collections of scripts for new devs to perform the local setup of projects
+Collections of scripts for various projects to perform the local setup
