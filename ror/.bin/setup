@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+{
+  RUBY_VERSION=$(cat .ruby-version)
+  PROJECT_NAME=__PROJECT_NAME__
+  EXPRESS_MODE=false
+} >/dev/null 2>&1
+
+print_usage () {
+  echo "Usage: $0 [OPTIONS]"
+  echo
+  echo "Setup the project on local"
+  echo "Options:"
+  echo "  -e  --express                 Auto install the dependencies whenever possible (default: false)"
+  echo "  -h, --help                    Print this usage information"
+}
+
+if [ ! -z "$1" ]
+  then
+    case $1 in
+    -e|--express)
+    EXPRESS_MODE=true
+    ;;
+    -h|--help)
+    print_usage
+    exit 0
+    ;;
+    *)    # unknown option
+    echo "Unknown option provided"
+    exit 0
+    ;;
+  esac
+fi
+
+## bootstrap function called at bottom of file comment out verification steps you don't need
+init (){
+  verify_homebrew
+  verify_rbenv
+  verify_ruby_version &&
+  verify_bundled_gems
+  #verify_yarn
+  #verify_redis &&
+  #verify_redis_setup
+  verify_env_file
+  verify_postgres_running &&
+  verify_database_migrations
+}
+
+has_homebrew (){
+  hash brew >/dev/null 2>&1
+}
+
+verify_homebrew (){
+  if [ ! has_homebrew ] 
+  then
+    if [ "$EXPRESS_MODE" = true ]
+    then
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    else
+      echo "Please install Homebrew https://brew.sh/"
+      exit 1
+    fi
+  else
+    brew update
+  fi
+}
+
+has_rbenv (){
+  hash rbenv >/dev/null 2>&1
+}
+
+verify_rbenv (){
+  if [ ! has_rbenv ]
+  then
+    if [ "$EXPRESS_MODE" = true ]
+    then
+      brew install rbenv ruby-build
+    else
+      echo "Please install rbenv to manage your ruby versions https://github.com/rbenv/rbenv"
+      exit 1
+    fi
+  fi
+}
+
+has_postgres (){
+  hash psql >/dev/null 2>&1
+}
+
+postgres_is_running (){
+  ps aux | grep [p]ostgres >/dev/null 2>&1
+}
+
+has_rbenv (){
+  hash rbenv >/dev/null 2>&1
+}
+
+has_ruby_version (){
+  INSTALLED_RUBY_VERSION=$(ruby -e 'puts RUBY_VERSION')
+  [ "$INSTALLED_RUBY_VERSION" == "$RUBY_VERSION" ]
+}
+
+install_ruby_version (){
+  echo "Installing Ruby Version $RUBY_VERSION"
+  brew update
+  brew upgrade ruby-build
+  rbenv install $RUBY_VERSION
+}
+
+verify_ruby_version (){
+  has_ruby_version || install_ruby_version
+}
+
+verify_bundled_gems () {
+  echo 'Updating gems...'
+  {
+    (gem list -i bundler || gem install bundler) && bundle install
+  } 2>&1
+}
+
+verify_env_file (){
+  if [[ "$EXPRESS_MODE" = true  &&  ! -f .env]]
+  then
+    cp .env.sample .env
+  else
+    echo "Please create a .env File int by copying the .env.sample file"
+    exit 1
+  fi
+}
+
+verify_postgres_running () {
+  has_postgres || {
+    brew install postgresql
+    echo 'Installing postgresql...'
+  }
+
+  postgres_is_running || {
+    echo 'Starting postgresql'
+    pg_ctl -D /usr/local/var/postgres start
+  }
+}
+
+verify_database_configuration () {
+  if [ ! -f config/database.yml ]
+  then
+    cp config/database.travis.yml config/database.yml
+    bundle exec rake db:create:all
+
+    if [ $? -ne 0 ]
+    then
+      echo 'Unable to create the databases for you. Please ensure your database.yml is configured for your system and run rake db:create:all'
+      exit 0
+    fi
+  fi
+}
+
+verify_database_migrations () {
+  verify_database_configuration
+
+  bundle exec rake db:abort_if_pending_migrations
+  if [ $? -eq 1 ]
+  then
+    echo 'Running migrations...'
+    bundle exec rake db:migrate db:test:prepare
+    bundle exec rake db:seed
+  fi
+}
+
+# start it up!!
+init
+echo 'Ready !'
+echo 'Run `bin/rails s` to start the server'
